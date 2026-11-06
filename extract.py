@@ -10,6 +10,7 @@ import base64
 import json
 import os
 import re
+import time
 from datetime import date, timedelta
 
 import httpx
@@ -71,13 +72,17 @@ Notice:
 
 async def extract(restaurant: dict, source: dict, today: date, image: tuple[bytes, str] | None = None) -> dict:
     """Return the extraction plus which engine produced it."""
-    if GEMINI_KEY:
+    if GEMINI_KEY and time.time() < _cooldown["until"]:
+        note = "The AI is out of quota right now, so the basic parser was used."
+    elif GEMINI_KEY:
         try:
             out = await _gemini(restaurant, source, today, image)
             out["engine"] = "ai"
             out["engine_note"] = f"Read by {_model['name']}"
             return _check_quote(out)
         except GeminiError as e:
+            if "429" in str(e):
+                _cooldown["until"] = time.time() + 600  # stop hammering a key that is out of quota
             note = f"The AI could not read this ({e}), so the basic parser was used."
         except Exception as e:  # noqa: BLE001
             note = f"The AI could not read this ({type(e).__name__}), so the basic parser was used."
@@ -101,6 +106,7 @@ class GeminiError(Exception):
 # Google retires model names now and then, and free keys have small per-minute limits.
 # If the configured model is gone or out of quota, try the other Flash models this key can use.
 _model = {"name": GEMINI_MODEL}
+_cooldown = {"until": 0.0}
 API = "https://generativelanguage.googleapis.com/v1beta/models"
 
 
@@ -123,7 +129,7 @@ async def _post(client, model, body):
     r = await client.post(url, params={"key": GEMINI_KEY}, json=body)
     if r.status_code == 429:
         m = re.search(r'"retryDelay":\s*"(\d+)', r.text)
-        await asyncio.sleep(min(int(m.group(1)) if m else 6, 20))
+        await asyncio.sleep(min(int(m.group(1)) if m else 3, 5))
         r = await client.post(url, params={"key": GEMINI_KEY}, json=body)
     if r.status_code == 400 and "responseSchema" in body["generationConfig"]:
         # some model versions reject parts of the schema, so fall back to plain JSON mode
@@ -144,7 +150,7 @@ async def _gemini(restaurant, source, today, image):
     async with httpx.AsyncClient(timeout=45) as client:
         r = await _post(client, _model["name"], body)
         if r.status_code in (404, 429):
-            for name in await _candidates(client):
+            for name in (await _candidates(client))[:3]:
                 if name == _model["name"]:
                     continue
                 r = await _post(client, name, body)
