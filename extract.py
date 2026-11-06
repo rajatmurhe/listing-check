@@ -74,7 +74,7 @@ async def extract(restaurant: dict, source: dict, today: date, image: tuple[byte
         try:
             out = await _gemini(restaurant, source, today, image)
             out["engine"] = "ai"
-            out["engine_note"] = f"Read by {GEMINI_MODEL}"
+            out["engine_note"] = f"Read by {_model['name']}"
             return _check_quote(out)
         except GeminiError as e:
             note = f"The AI could not read this ({e}), so the basic parser was used."
@@ -97,6 +97,25 @@ class GeminiError(Exception):
     pass
 
 
+# Google retires model names now and then. If the configured one is gone,
+# ask the API which models this key can use and pick the newest Flash model.
+_model = {"name": GEMINI_MODEL}
+
+
+async def _pick_model(client) -> str | None:
+    r = await client.get("https://generativelanguage.googleapis.com/v1beta/models",
+                         params={"key": GEMINI_KEY, "pageSize": 200})
+    if r.status_code >= 400:
+        return None
+    names = [m["name"].split("/")[-1] for m in r.json().get("models", [])
+             if "generateContent" in m.get("supportedGenerationMethods", [])]
+    skip = ("lite", "image", "tts", "live", "audio", "thinking")
+    flash = [n for n in names if "flash" in n and not any(w in n for w in skip)]
+    stable = [n for n in flash if "preview" not in n and "exp" not in n]
+    pool = stable or flash
+    return sorted(pool, reverse=True)[0] if pool else None
+
+
 async def _gemini(restaurant, source, today, image):
     parts = [{"text": _prompt(restaurant, source, today)}]
     if image:
@@ -106,9 +125,15 @@ async def _gemini(restaurant, source, today, image):
         "contents": [{"role": "user", "parts": parts}],
         "generationConfig": {"temperature": 0, "responseMimeType": "application/json", "responseSchema": SCHEMA},
     }
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent"
     async with httpx.AsyncClient(timeout=45) as client:
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{_model['name']}:generateContent"
         r = await client.post(url, params={"key": GEMINI_KEY}, json=body)
+        if r.status_code == 404:
+            picked = await _pick_model(client)
+            if picked:
+                _model["name"] = picked
+                url = f"https://generativelanguage.googleapis.com/v1beta/models/{picked}:generateContent"
+                r = await client.post(url, params={"key": GEMINI_KEY}, json=body)
         if r.status_code == 400:
             # some model versions reject parts of the schema, so fall back to plain JSON mode
             body["generationConfig"].pop("responseSchema", None)
