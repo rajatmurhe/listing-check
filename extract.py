@@ -5,6 +5,7 @@ If the AI is unavailable, a basic parser runs instead and the result says so.
 """
 from __future__ import annotations
 
+import asyncio
 import base64
 import json
 import os
@@ -97,23 +98,38 @@ class GeminiError(Exception):
     pass
 
 
-# Google retires model names now and then. If the configured one is gone,
-# ask the API which models this key can use and pick the newest Flash model.
+# Google retires model names now and then, and free keys have small per-minute limits.
+# If the configured model is gone or out of quota, try the other Flash models this key can use.
 _model = {"name": GEMINI_MODEL}
+API = "https://generativelanguage.googleapis.com/v1beta/models"
 
 
-async def _pick_model(client) -> str | None:
-    r = await client.get("https://generativelanguage.googleapis.com/v1beta/models",
-                         params={"key": GEMINI_KEY, "pageSize": 200})
+async def _candidates(client) -> list[str]:
+    r = await client.get(API, params={"key": GEMINI_KEY, "pageSize": 200})
     if r.status_code >= 400:
-        return None
+        return []
     names = [m["name"].split("/")[-1] for m in r.json().get("models", [])
              if "generateContent" in m.get("supportedGenerationMethods", [])]
-    skip = ("lite", "image", "tts", "live", "audio", "thinking")
+    skip = ("image", "tts", "live", "audio", "thinking")
     flash = [n for n in names if "flash" in n and not any(w in n for w in skip)]
-    stable = [n for n in flash if "preview" not in n and "exp" not in n]
-    pool = stable or flash
-    return sorted(pool, reverse=True)[0] if pool else None
+    stable = sorted([n for n in flash if "preview" not in n and "exp" not in n and "lite" not in n], reverse=True)
+    lite = sorted([n for n in flash if "lite" in n and "preview" not in n], reverse=True)
+    rest = sorted([n for n in flash if n not in stable and n not in lite], reverse=True)
+    return stable + lite + rest
+
+
+async def _post(client, model, body):
+    url = f"{API}/{model}:generateContent"
+    r = await client.post(url, params={"key": GEMINI_KEY}, json=body)
+    if r.status_code == 429:
+        m = re.search(r'"retryDelay":\s*"(\d+)', r.text)
+        await asyncio.sleep(min(int(m.group(1)) if m else 6, 20))
+        r = await client.post(url, params={"key": GEMINI_KEY}, json=body)
+    if r.status_code == 400 and "responseSchema" in body["generationConfig"]:
+        # some model versions reject parts of the schema, so fall back to plain JSON mode
+        body["generationConfig"].pop("responseSchema", None)
+        r = await client.post(url, params={"key": GEMINI_KEY}, json=body)
+    return r
 
 
 async def _gemini(restaurant, source, today, image):
@@ -126,18 +142,15 @@ async def _gemini(restaurant, source, today, image):
         "generationConfig": {"temperature": 0, "responseMimeType": "application/json", "responseSchema": SCHEMA},
     }
     async with httpx.AsyncClient(timeout=45) as client:
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/{_model['name']}:generateContent"
-        r = await client.post(url, params={"key": GEMINI_KEY}, json=body)
-        if r.status_code == 404:
-            picked = await _pick_model(client)
-            if picked:
-                _model["name"] = picked
-                url = f"https://generativelanguage.googleapis.com/v1beta/models/{picked}:generateContent"
-                r = await client.post(url, params={"key": GEMINI_KEY}, json=body)
-        if r.status_code == 400:
-            # some model versions reject parts of the schema, so fall back to plain JSON mode
-            body["generationConfig"].pop("responseSchema", None)
-            r = await client.post(url, params={"key": GEMINI_KEY}, json=body)
+        r = await _post(client, _model["name"], body)
+        if r.status_code in (404, 429):
+            for name in await _candidates(client):
+                if name == _model["name"]:
+                    continue
+                r = await _post(client, name, body)
+                if r.status_code < 400:
+                    _model["name"] = name
+                    break
         if r.status_code >= 400:
             raise GeminiError(f"HTTP {r.status_code}: {r.text[:160]}")
         txt = r.json()["candidates"][0]["content"]["parts"][0]["text"]
