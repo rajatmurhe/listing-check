@@ -1,0 +1,16 @@
+name: Nightly listing check
+on:
+  schedule:
+    - cron: "35 20 * * *"   # 02:05 IST every night
+  workflow_dispatch: {}
+jobs:
+  run-check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Wake the server and run the check
+        env:
+          APP_URL: ${{ secrets.APP_URL }}
+          CRON_TOKEN: ${{ secrets.CRON_TOKEN }}
+        run: |
+          curl -sS --retry 6 --retry-delay 20 --retry-all-errors --max-time 120 "$APP_URL/healthz"
+          curl -sS --fail --max-time 180 -X POST -H "X-Cron-Token: $CRON_TOKEN" "$APP_URL/api/run-check" | head -c 600
