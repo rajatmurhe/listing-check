@@ -1,0 +1,372 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Listing Check</title>
+<meta name="description" content="Catches restaurant closures and hour changes before diners make a wasted trip. Concept prototype.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=Figtree:wght@400;500;600;700&family=JetBrains+Mono:wght@500&display=swap">
+<style>
+/* Layout: a warm operations console. A story band explains the wasted trip, then the nightly check and listings on the left, what restaurants and diners are told on the right. */
+:root{
+  --bg:#f5f4ee; --surface:#ffffff; --sunk:#ecebe3; --ink:#1f2421; --muted:#5d625c; --line:#d9d8ce;
+  --accent:#c8442a; --accent-ink:#ffffff; --accent-soft:#f8e1da;
+  --ok:#2f7a4f; --ok-soft:#dcefe2; --warn:#a86a00; --warn-soft:#f6ead0; --bad:#a1352a; --bad-soft:#f6dcd7; --idle:#5f6b66; --idle-soft:#e6e7e0;
+  --display:"Bricolage Grotesque","Segoe UI",system-ui,sans-serif; --body:"Figtree","Segoe UI",system-ui,sans-serif; --mono:"JetBrains Mono",ui-monospace,Menlo,monospace;
+  color-scheme:light;
+}
+@media (prefers-color-scheme:dark){:root{
+  --bg:#151816; --surface:#1d211f; --sunk:#252a27; --ink:#eceee8; --muted:#a3a9a2; --line:#343a36;
+  --accent:#f07a5e; --accent-ink:#1a0d09; --accent-soft:#3b231d;
+  --ok:#6cc791; --ok-soft:#1c3226; --warn:#e3b45a; --warn-soft:#36301f; --bad:#f08a7c; --bad-soft:#3a201c; --idle:#a9b1ab; --idle-soft:#29302c; color-scheme:dark}}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:var(--bg);color:var(--ink);font-family:var(--body);font-size:15px;line-height:1.5}
+.wrap{max-width:1220px;margin:0 auto;padding:30px max(16px,env(safe-area-inset-right,0px)) 56px max(16px,env(safe-area-inset-left,0px))}
+header{display:flex;flex-wrap:wrap;gap:12px 24px;align-items:flex-end;justify-content:space-between}
+h1{font-family:var(--display);font-weight:800;font-size:clamp(34px,5.4vw,52px);margin:0;letter-spacing:-.03em;line-height:1}
+h1 span{color:var(--accent)}
+h2{font-family:var(--display);font-size:21px;font-weight:700;margin:0 0 4px;letter-spacing:-.01em;text-wrap:balance}
+h3{font-size:15px;margin:0}
+p{margin:0}
+.lede{color:var(--muted);font-size:17px;margin-top:10px;max-width:60ch}
+.disclaimer{font-size:12.5px;color:var(--muted);margin-top:8px;max-width:80ch}
+.tag{font-size:12px;color:var(--muted);border:1px solid var(--line);border-radius:999px;padding:5px 11px;white-space:nowrap;background:var(--surface)}
+.story{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin:22px 0 10px}
+@media (max-width:820px){.story{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.beat{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:12px 14px;position:relative;min-width:0}
+.beat .k{font-family:var(--display);font-weight:700;font-size:15px;display:flex;align-items:center;gap:8px}
+.beat .k i{width:26px;height:26px;border-radius:50%;display:grid;place-items:center;font-style:normal;font-size:13px;font-weight:800;color:#fff;flex:none}
+.beat p{font-size:13.5px;color:var(--muted);margin-top:4px}
+.beat.bad{background:var(--bad-soft);border-color:transparent}
+.beat.good{background:var(--ok-soft);border-color:transparent}
+.flow{display:flex;flex-wrap:wrap;gap:8px;margin:14px 0 22px}
+.flow span{font-size:13px;background:var(--sunk);border-radius:999px;padding:6px 12px}
+.flow b{color:var(--accent);font-family:var(--mono)}
+.grid{display:grid;grid-template-columns:minmax(0,7fr) minmax(0,5fr);gap:22px;align-items:start}
+@media (max-width:900px){.grid{grid-template-columns:minmax(0,1fr)}}
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:20px;min-width:0}
+.stack{display:flex;flex-direction:column;gap:22px;min-width:0}
+.sub{color:var(--muted);font-size:13.5px;margin-bottom:14px}
+.btn{font:inherit;font-weight:700;border-radius:10px;padding:11px 16px;cursor:pointer;border:1px solid var(--line);background:var(--surface);color:var(--ink)}
+.btn:hover{border-color:var(--accent)}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.btn.primary:hover{filter:brightness(1.05)}
+.btn.small{padding:7px 12px;font-size:13px}
+.btn:disabled{opacity:.6;cursor:progress}
+.btn:focus-visible,select:focus-visible,textarea:focus-visible,input:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.row{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+.pill{display:inline-block;font-size:11.5px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;border-radius:6px;padding:3px 8px;white-space:nowrap}
+.p-ok{background:var(--ok-soft);color:var(--ok)} .p-warn{background:var(--warn-soft);color:var(--warn)}
+.p-bad{background:var(--bad-soft);color:var(--bad)} .p-idle{background:var(--idle-soft);color:var(--idle)} .p-acc{background:var(--accent-soft);color:var(--accent)}
+.runbox{display:grid;gap:12px}
+.runsum{display:grid;grid-template-columns:repeat(auto-fit,minmax(118px,1fr));gap:8px}
+.stat{background:var(--sunk);border-radius:12px;padding:10px 12px}
+.stat .n{font-family:var(--mono);font-size:24px;font-variant-numeric:tabular-nums;line-height:1.2}
+.stat .l{font-size:12.5px;color:var(--muted)}
+.runs{font-size:13px;border-top:1px solid var(--line);padding-top:10px}
+.runs summary{cursor:pointer;color:var(--muted);font-weight:600}
+.runline{display:flex;flex-wrap:wrap;gap:6px 12px;padding:6px 0;border-bottom:1px dashed var(--line)}
+.runline .t{font-family:var(--mono);font-size:12px;color:var(--muted)}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:14px}
+.rc{border:1px solid var(--line);border-radius:14px;padding:15px;background:var(--surface);display:flex;flex-direction:column;gap:9px;min-width:0}
+.rc.flag{border:2px solid var(--warn)} .rc.closedtoday{border:2px solid var(--bad)} .rc.okc{border:2px solid var(--ok)}
+.rc .top{display:flex;justify-content:space-between;gap:8px;align-items:flex-start}
+.rc .id{display:flex;gap:10px;align-items:center;min-width:0}
+.av{width:38px;height:38px;border-radius:50%;display:grid;place-items:center;font-weight:800;font-size:15px;color:#fff;flex:none;font-family:var(--display)}
+.rc .name{font-family:var(--display);font-size:18px;font-weight:700;line-height:1.15}
+.rc .meta{color:var(--muted);font-size:13px}
+.today{font-weight:700;font-size:14px;font-family:var(--mono);font-size:13.5px}
+.today.closed{color:var(--bad)}
+.note{border-radius:10px;padding:8px 11px;font-size:14px;font-weight:600}
+.note .lab{display:block;font-size:12.5px;font-weight:500;margin-top:2px}
+.n-confirmed{background:var(--ok-soft)} .n-confirmed .lab{color:var(--ok)}
+.n-detected{background:var(--warn-soft)} .n-detected .lab{color:var(--warn)}
+.n-ended{background:var(--idle-soft)} .n-ended .lab{color:var(--idle)}
+.case{font-size:12.5px;color:var(--muted);border-top:1px dashed var(--line);padding-top:8px}
+.case b{color:var(--ink);font-weight:600}
+.why{font-size:13px}
+.why summary{cursor:pointer;color:var(--accent);font-weight:700}
+.ev{margin-top:10px;border-left:3px solid var(--accent-soft);padding:4px 0 4px 10px;display:grid;gap:7px}
+.quote{font-family:var(--mono);font-size:12.5px;background:var(--sunk);border-radius:8px;padding:7px 9px;overflow-wrap:anywhere}
+.checks{list-style:none;padding:0;margin:0;display:grid;gap:3px;font-size:12.5px}
+.checks li::before{content:"";display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:7px;vertical-align:1px}
+.checks li.y::before{background:var(--ok)} .checks li.n::before{background:var(--bad)}
+.checks .d{color:var(--muted)}
+.inbox{display:grid;gap:10px}
+.msg{border:1px solid var(--line);border-radius:14px;padding:12px 13px;font-size:14px;display:grid;grid-template-columns:34px minmax(0,1fr);gap:4px 10px;background:var(--surface)}
+.msg .av{width:34px;height:34px;font-size:13px;grid-row:span 3}
+.msg.urgent{border:2px solid var(--bad)}
+.msg .head{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;font-size:12.5px;color:var(--muted)}
+.msg .who{font-weight:700;color:var(--ink)}
+.msg.done{opacity:.7}
+.answered{font-size:12.5px;color:var(--ok);font-weight:700}
+.empty{color:var(--muted);font-size:14px;border:1px dashed var(--line);border-radius:12px;padding:18px;text-align:center}
+form{display:grid;gap:12px}
+.fields{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px}
+label{font-size:12px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--muted);display:grid;gap:6px}
+select,textarea,input[type=date],input[type=file]{font:inherit;text-transform:none;letter-spacing:normal;font-weight:400;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:10px 12px;width:100%}
+textarea{min-height:100px;resize:vertical}
+.examples{display:flex;flex-wrap:wrap;gap:6px}
+.result{border:2px solid var(--accent);border-radius:14px;padding:15px;display:grid;gap:10px;background:var(--surface)}
+.kv{display:grid;grid-template-columns:auto minmax(0,1fr);gap:4px 12px;font-size:13.5px}
+.kv dt{color:var(--muted)} .kv dd{margin:0;overflow-wrap:anywhere}
+.rules table{width:100%;border-collapse:collapse;font-size:14px;min-width:560px}
+.rules th,.rules td{text-align:left;padding:10px 8px;border-bottom:1px solid var(--line);vertical-align:top}
+.rules th{font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+.tbl{overflow-x:auto}
+.toast{position:fixed;left:50%;bottom:max(18px,env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:11px 16px;border-radius:12px;font-size:14px;max-width:min(560px,92vw);z-index:5;font-weight:600}
+.err{color:var(--bad);font-size:13.5px}
+footer{margin-top:30px;color:var(--muted);font-size:12.5px;max-width:90ch}
+.ai{font-size:12.5px}
+@media (prefers-reduced-motion:no-preference){.rc,.msg,.result{animation:rise .35s ease both}@keyframes rise{from{transform:translateY(6px);opacity:.5}to{transform:none;opacity:1}}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <h1>Listing<span>Check</span></h1>
+      <p class="lede">Catches restaurant closures and changed hours before a diner makes a wasted trip. Every night it reads what restaurants post, the AI pulls out the dates with the exact words as evidence, fixed rules decide what may change, and the restaurant confirms with one tap.</p>
+    </div>
+    <span class="tag">Concept prototype for Dineout · fictional restaurants</span>
+  </header>
+  <p class="disclaimer">By Rajat Murhe. Sample posts and bookings only; nothing here touches Swiggy's real systems. <span class="ai" id="aiState"></span></p>
+
+  <div class="story" aria-label="The problem and the fix">
+    <div class="beat bad"><div class="k"><i style="background:var(--bad)">1</i>The post</div><p>The restaurant tells Instagram it is closed for Diwali. Nobody updates the listing.</p></div>
+    <div class="beat bad"><div class="k"><i style="background:var(--bad)">2</i>The wasted trip</div><p>A diner books a table, crosses the city, and finds the shutters down.</p></div>
+    <div class="beat good"><div class="k"><i style="background:var(--ok)">3</i>The nightly check</div><p>Listing Check reads the post, quotes the exact words and flags the dates.</p></div>
+    <div class="beat good"><div class="k"><i style="background:var(--ok)">4</i>One tap</div><p>The restaurant confirms, the listing updates, and booked diners hear first.</p></div>
+  </div>
+
+  <div class="flow" aria-label="How to try it">
+    <span><b>1</b> Run tonight's check</span>
+    <span><b>2</b> Open "Why" on a listing</span>
+    <span><b>3</b> Answer as the restaurant</span>
+    <span><b>4</b> Try your own notice or photo</span>
+  </div>
+
+  <div class="grid">
+    <div class="stack">
+      <section class="panel" aria-labelledby="run-h">
+        <h2 id="run-h">Tonight's check</h2>
+        <p class="sub">Runs every night on a schedule. You can also run it now. Each run is recorded below.</p>
+        <div class="runbox">
+          <div class="row">
+            <button class="btn primary" id="runBtn" type="button">Run tonight's check</button>
+            <button class="btn small" id="resetBtn" type="button">Reset demo</button>
+            <span class="err" id="runErr"></span>
+          </div>
+          <div id="lastRun"></div>
+          <details class="runs" id="runHist"><summary>Run history</summary><div id="runList"></div></details>
+        </div>
+      </section>
+
+      <section class="panel" aria-labelledby="list-h">
+        <h2 id="list-h">Listings diners see</h2>
+        <p class="sub">Each restaurant tests one rule. Open "Why" to see the evidence and every check.</p>
+        <div class="cards" id="cards"></div>
+      </section>
+    </div>
+
+    <div class="stack">
+      <section class="panel" aria-labelledby="partner-h">
+        <h2 id="partner-h">Restaurant partner inbox</h2>
+        <p class="sub">What restaurants receive. Answer as the restaurant to see the listing update.</p>
+        <div class="inbox" id="partnerInbox"></div>
+      </section>
+      <section class="panel" aria-labelledby="diner-h">
+        <h2 id="diner-h">Messages to diners with bookings</h2>
+        <p class="sub">Diners booked on an affected date hear about it before they travel.</p>
+        <div class="inbox" id="dinerInbox"></div>
+      </section>
+    </div>
+  </div>
+
+  <section class="panel" style="margin-top:20px" aria-labelledby="try-h">
+    <h2 id="try-h">Try your own notice</h2>
+    <p class="sub">Paste a notice or upload a photo of one, such as a signboard or an Instagram post. The AI reads it live, then the rules decide.</p>
+    <form id="tryForm">
+      <div class="fields">
+        <label>Restaurant<select id="tRest" name="restaurant_id"></select></label>
+        <label>Where it came from<select id="tKind" name="kind">
+          <option value="authorised">The restaurant's own linked account</option>
+          <option value="public">Someone else's post</option>
+          <option value="diner_report">A diner's report</option>
+        </select></label>
+        <label>Posted on<input type="date" id="tDate" name="posted_on"></label>
+      </div>
+      <label>Notice text<textarea id="tText" name="text" placeholder="Example: We will be closed on 20 Nov for Diwali. Back to normal hours on 21 Nov."></textarea></label>
+      <div class="examples" id="examples"></div>
+      <label>Or a photo of the notice (JPG, PNG or WEBP, under 4 MB)<input type="file" id="tPhoto" name="photo" accept="image/jpeg,image/png,image/webp"></label>
+      <div class="row"><button class="btn primary" id="tryBtn" type="submit">Check this notice</button><span class="err" id="tryErr"></span></div>
+    </form>
+    <div id="tryResult" style="margin-top:14px"></div>
+  </section>
+
+  <section class="panel rules" style="margin-top:20px" aria-labelledby="rules-h">
+    <h2 id="rules-h">The rules</h2>
+    <p class="sub">The AI only reads. These fixed rules decide, based on who said it and how clear the evidence is. A changed listing is never marked "verified open".</p>
+    <div class="tbl"><table>
+      <thead><tr><th>Evidence</th><th>What happens</th></tr></thead>
+      <tbody>
+        <tr><td>The restaurant's own authorised account, this outlet, written dates, posted recently, not cancelled by a later post, quote found in the notice</td><td><span class="pill p-warn">Applied</span> Temporary closure added to the listing as "Detected from the restaurant's published notice". Restaurant notified and can undo. Booked diners told it is being confirmed.</td></tr>
+        <tr><td>A closure from anyone else, or a permanent closure</td><td><span class="pill p-bad">Urgent</span> Flagged and the restaurant is asked to confirm. Listing unchanged until then.</td></tr>
+        <tr><td>A change to regular hours</td><td><span class="pill p-acc">Proposed</span> Waits for the restaurant's one tap.</td></tr>
+        <tr><td>One diner report</td><td><span class="pill p-idle">Check</span> Triggers an early check with the restaurant. Never treated as proof.</td></tr>
+        <tr><td>Unclear outlet, unclear dates, or conflicting posts</td><td><span class="pill p-idle">Question</span> The restaurant is asked. Nothing changes.</td></tr>
+        <tr><td>A temporary closure reaches its end date</td><td><span class="pill p-idle">Ended</span> Back to regular hours, shown as not separately verified.</td></tr>
+      </tbody>
+    </table></div>
+  </section>
+
+  <footer>Made by Rajat Murhe. Independent concept, not affiliated with or endorsed by Swiggy. Restaurants, posts and bookings are fictional. Code: <a href="https://github.com/rajatmurhe/listing-check" style="color:var(--accent)">github.com/rajatmurhe/listing-check</a></footer>
+</div>
+<div class="toast" id="toast" hidden></div>
+
+<script>
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+let S = null;
+const COLORS = ["#c8442a","#2f7a4f","#3d5a99","#8a4fa3","#a86a00","#1f7f86"];
+const colorFor = id => { const i = S ? S.restaurants.findIndex(r=>r.id===id) : 0; return COLORS[(i<0?0:i)%COLORS.length]; };
+const ACTION_PILL = {auto_apply:["Applied","p-warn"], urgent_confirm:["Urgent","p-bad"], propose:["Proposed","p-acc"], investigate:["Check","p-idle"], clarify:["Question","p-idle"], no_change:["No change","p-ok"]};
+
+function toast(t){ const el=$("#toast"); el.textContent=t; el.hidden=false; clearTimeout(toast.t); toast.t=setTimeout(()=>el.hidden=true,4200); }
+async function api(path, opts={}){
+  const r = await fetch(path, opts); let j={};
+  try{ j = await r.json(); }catch(e){}
+  if(!r.ok) throw new Error(j.error || "Something went wrong. Please try again.");
+  return j;
+}
+function fmtTime(iso){ try{ const d=new Date(iso); return d.toLocaleString("en-IN",{day:"numeric",month:"short",hour:"2-digit",minute:"2-digit"}); }catch(e){ return iso; } }
+
+function render(){
+  $("#aiState").textContent = S.ai.enabled ? `AI reader: ${S.ai.model}.` : "AI reader is not connected on this server, so a basic parser is used and labelled.";
+  // last run
+  const r = S.runs[0];
+  if(!r){ $("#lastRun").innerHTML = `<div class="empty">No check has run since the demo was reset. Press "Run tonight's check".</div>`; }
+  else{
+    const c = r.counts || {};
+    $("#lastRun").innerHTML = `
+      <div class="row" style="font-size:13px;color:var(--muted)"><span class="pill ${r.trigger==="nightly schedule"?"p-acc":"p-idle"}">${esc(r.trigger)}</span> Last run ${esc(fmtTime(r.finished))}. ${r.ai_reads} read by AI${r.basic_reads?`, ${r.basic_reads} by the basic parser`:""}.</div>
+      <div class="runsum">
+        <div class="stat"><div class="n">${r.listings}</div><div class="l">listings checked</div></div>
+        <div class="stat"><div class="n">${r.new_notices}</div><div class="l">new notices read</div></div>
+        <div class="stat"><div class="n">${c.auto_apply||0}</div><div class="l">closures applied</div></div>
+        <div class="stat"><div class="n">${(c.propose||0)+(c.urgent_confirm||0)+(c.clarify||0)+(c.investigate||0)}</div><div class="l">sent to restaurants</div></div>
+        <div class="stat"><div class="n">${(r.expired||[]).length}</div><div class="l">closures ended</div></div>
+      </div>
+      ${r.new_notices===0?`<p class="sub" style="margin:0">Nothing new since the last run, so nothing was read again.</p>`:""}`;
+  }
+  $("#runList").innerHTML = S.runs.map(x=>`<div class="runline"><span class="t">${esc(fmtTime(x.finished))}</span><span>${esc(x.trigger)}</span><span>${x.new_notices} new notices</span><span>${Object.entries(x.counts||{}).map(([k,v])=>`${v} ${esc(ACTION_PILL[k]?.[0]||k).toLowerCase()}`).join(", ")||"no actions"}</span>${(x.expired||[]).length?`<span>${x.expired.length} ended</span>`:""}</div>`).join("") || `<p class="sub">No runs yet.</p>`;
+
+  // cards
+  $("#cards").innerHTML = S.restaurants.map(rest => {
+    const decs = S.sources.filter(s=>s.restaurant_id===rest.id && S.decisions[s.id]).map(s=>({s, d:S.decisions[s.id]}));
+    const closed = /Closed|Permanently/.test(rest.today);
+    const st = closed ? "closedtoday" : rest.notes.some(n=>n.status==="detected") ? "flag" : rest.notes.some(n=>n.status==="confirmed") || rest.hours_note ? "okc" : "";
+    return `<article class="rc ${st}">
+      <div class="top"><div class="id"><div class="av" style="background:${colorFor(rest.id)}" aria-hidden="true">${esc(rest.name[0])}</div><div style="min-width:0"><div class="name">${esc(rest.name)}</div><div class="meta">${esc(rest.branch)} · ${esc(rest.cuisine)}${rest.other_branches.length?` · also in ${esc(rest.other_branches.join(", "))}`:""}</div></div></div>
+      ${rest.pending_count?`<span class="pill p-acc" title="Waiting for the restaurant">${rest.pending_count} waiting</span>`:""}</div>
+      <div class="today ${closed?"closed":""}">${esc(rest.today)}</div>
+      ${rest.hours_note?`<div class="note n-confirmed">Regular hours changed<span class="lab">${esc(rest.hours_note)}</span></div>`:""}
+      ${rest.notes.map(n=>`<div class="note n-${esc(n.status)}">${esc(n.text)}<span class="lab">${esc(n.label)}</span></div>`).join("")}
+      ${decs.length?`<details class="why"><summary>Why (${decs.length} notice${decs.length>1?"s":""})</summary>${decs.map(({s,d})=>evidence(s,d)).join("")}</details>`:`<div class="meta">No notices read yet.</div>`}
+      <div class="case"><b>Test case:</b> ${esc(rest.scenario)}</div>
+    </article>`;
+  }).join("");
+
+  // inboxes
+  const pm = S.messages.filter(m=>m.to==="partner"), dm = S.messages.filter(m=>m.to==="diner");
+  $("#partnerInbox").innerHTML = pm.length ? pm.map(msgCard).join("") : `<div class="empty">Nothing yet. Run the check to see what restaurants are asked.</div>`;
+  $("#dinerInbox").innerHTML = dm.length ? dm.map(msgCard).join("") : `<div class="empty">No diner has been told anything yet.</div>`;
+  document.querySelectorAll("[data-ans]").forEach(b=>b.onclick=()=>answerMsg(b.dataset.msg,b.dataset.ans,b));
+}
+
+function evidence(s,d){
+  const x=d.extraction, dec=d.decision, [lab,cls]=ACTION_PILL[dec.action]||[dec.action,"p-idle"];
+  const dates = x.start_date ? (x.start_date===x.end_date? x.start_date : `${x.start_date} to ${x.end_date}`) : "none";
+  return `<div class="ev">
+    <div class="row"><span class="pill ${cls}">${esc(lab)}</span><span class="meta">${esc(s.channel)}, posted ${esc(s.posted_on)}</span></div>
+    <div class="quote">"${esc(x.quote||"(no quote)")}"${x.quote_verified?"":" <span class='pill p-bad'>quote not found in notice</span>"}</div>
+    <dl class="kv"><dt>Read as</dt><dd>${esc(x.change_type.replaceAll("_"," "))}${x.new_open?`, opens ${esc(x.new_open)}`:""}</dd><dt>Dates</dt><dd>${esc(dates)} (${esc(x.date_certainty)})</dd><dt>Outlet named</dt><dd>${esc(x.branch_mentioned||"none")}</dd><dt>Read by</dt><dd>${esc(x.engine_note||"")}</dd></dl>
+    <div><b>${esc(dec.action_text)}</b> ${esc(dec.reason)}</div>
+    <ul class="checks">${dec.checks.map(c=>`<li class="${c.ok?"y":"n"}">${esc(c.name)}${c.detail?` <span class="d">(${esc(c.detail)})</span>`:""}</li>`).join("")}</ul>
+  </div>`;
+}
+
+function msgCard(m){
+  const r = S.restaurants.find(x=>x.id===m.restaurant_id);
+  const who = m.to==="partner" ? `${r?.name} ${r?.branch}` : `Diner booked at ${r?.name}`;
+  const btns = (!m.answered && m.buttons.length && !(m.buttons.length===1&&m.buttons[0][0]==="noop"))
+    ? `<div class="row">${m.buttons.map(([k,l])=>`<button class="btn small" type="button" data-msg="${esc(m.id)}" data-ans="${esc(k)}">${esc(l)}</button>`).join("")}</div>` : "";
+  const av = m.to==="partner" ? `<div class="av" style="background:${colorFor(m.restaurant_id)}" aria-hidden="true">${esc((r?.name||"?")[0])}</div>` : `<div class="av" style="background:var(--idle)" aria-hidden="true">${esc((m.text.split(":")[0]||"D")[0])}</div>`;
+  return `<div class="msg ${m.urgent?"urgent":""} ${m.answered?"done":""}">${av}
+    <div class="head"><span class="who">${esc(who)}</span><span>${m.urgent?`<span class="pill p-bad">Urgent</span> `:""}${esc(fmtTime(m.at))}</span></div>
+    <div>${esc(m.text)}</div>${btns}${m.answered?`<div class="answered">Answered</div>`:""}</div>`;
+}
+
+async function load(){ S = await api("/api/state"); render(); fillForm(); }
+async function answerMsg(id, choice, btn){
+  btn.disabled=true;
+  try{ const fd=new FormData(); fd.append("message_id",id); fd.append("choice",choice);
+    const j=await api("/api/answer",{method:"POST",body:fd}); S=j.state; render(); toast(j.result); }
+  catch(e){ toast(e.message); btn.disabled=false; }
+}
+$("#runBtn").onclick = async () => {
+  const b=$("#runBtn"); b.disabled=true; b.textContent="Reading notices..."; $("#runErr").textContent="";
+  try{ const j=await api("/api/run-check",{method:"POST"}); S=j.state; render();
+    toast(j.run.new_notices?`Check finished: ${j.run.new_notices} notices read.`:"Check finished: nothing new since the last run."); }
+  catch(e){ $("#runErr").textContent=e.message; }
+  finally{ b.disabled=false; b.textContent="Run tonight's check"; }
+};
+$("#resetBtn").onclick = async () => {
+  try{ const j=await api("/api/reset",{method:"POST"}); S=j.state; render(); $("#tryResult").innerHTML=""; toast("Demo reset to the sample restaurants. Run history is kept."); }
+  catch(e){ toast(e.message); }
+};
+
+let formFilled=false;
+function fillForm(){
+  if(formFilled) return; formFilled=true;
+  $("#tRest").innerHTML = S.restaurants.map(r=>`<option value="${esc(r.id)}">${esc(r.name)}, ${esc(r.branch)}</option>`).join("");
+  $("#tDate").value = S.today; $("#tDate").max = S.today;
+  const t = new Date(S.today+"T00:00:00");
+  const day = n => { const d=new Date(t); d.setDate(d.getDate()+n); return d.toLocaleDateString("en-GB",{day:"numeric",month:"short"}); };
+  const ex = [
+    ["Clear closure", "authorised", `We are closed from ${day(5)} to ${day(6)} for our annual staff trip. Back to normal on ${day(7)}.`],
+    ["New hours", "authorised", "New timings from next week: we open at 7 am for breakfast and close at 10 pm on all days."],
+    ["Vague notice", "authorised", "Closed this weekend for some maintenance work, sorry for the trouble!"],
+    ["Diner report", "diner_report", "Went for lunch today at 1 pm and it was locked. A guard said they are shut for a few days."],
+  ];
+  $("#examples").innerHTML = ex.map((e,i)=>`<button class="btn small" type="button" data-ex="${i}">${esc(e[0])}</button>`).join("");
+  document.querySelectorAll("[data-ex]").forEach(b=>b.onclick=()=>{ const e=ex[+b.dataset.ex]; $("#tText").value=e[2]; $("#tKind").value=e[1]; });
+}
+$("#tryForm").onsubmit = async (ev) => {
+  ev.preventDefault();
+  const b=$("#tryBtn"); b.disabled=true; b.textContent="Reading..."; $("#tryErr").textContent="";
+  try{
+    const fd=new FormData($("#tryForm"));
+    if(!$("#tPhoto").files.length) fd.delete("photo");
+    const j=await api("/api/try",{method:"POST",body:fd}); S=j.state; render();
+    const x=j.result.extraction, d=j.result.decision, s=j.result.source, [lab,cls]=ACTION_PILL[d.action]||[d.action,"p-idle"];
+    $("#tryResult").innerHTML = `<div class="result">
+      <div class="row"><span class="pill ${cls}">${esc(lab)}</span><b>${esc(d.action_text)}</b></div>
+      <p>${esc(d.reason)}</p>
+      ${x.transcript && $("#tPhoto").files.length ? `<dl class="kv"><dt>Text read from photo</dt><dd>${esc(x.transcript)}</dd></dl>`:""}
+      <div class="quote">"${esc(x.quote||"(no quote)")}"${x.quote_verified?"":" <span class='pill p-bad'>quote not found in notice</span>"}</div>
+      <dl class="kv"><dt>Read as</dt><dd>${esc(x.change_type.replaceAll("_"," "))}${x.new_open?`, opens ${esc(x.new_open)}`:""}${x.new_close?`, closes ${esc(x.new_close)}`:""}</dd>
+      <dt>Dates</dt><dd>${esc(x.start_date? (x.start_date===x.end_date?x.start_date:x.start_date+" to "+x.end_date):"none")} (${esc(x.date_certainty)})</dd>
+      <dt>Outlet named</dt><dd>${esc(x.branch_mentioned||"none")}</dd><dt>Summary</dt><dd>${esc(x.summary)}</dd><dt>Read by</dt><dd>${esc(x.engine_note)}</dd></dl>
+      <ul class="checks">${d.checks.map(c=>`<li class="${c.ok?"y":"n"}">${esc(c.name)}${c.detail?` <span class="d">(${esc(c.detail)})</span>`:""}</li>`).join("")}</ul>
+      <p class="sub" style="margin:0">See the restaurant's card and the partner inbox above for the result.</p></div>`;
+    $("#tPhoto").value="";
+  }catch(e){ $("#tryErr").textContent=e.message; }
+  finally{ b.disabled=false; b.textContent="Check this notice"; }
+};
+load().catch(e=>{ document.querySelector(".grid").insertAdjacentHTML("beforebegin",`<div class="empty">${esc(e.message)} The server may be waking up; refresh in 30 seconds.</div>`); });
+</script>
+</body>
+</html>
