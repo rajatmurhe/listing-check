@@ -11,7 +11,7 @@ from fastapi import FastAPI, File, Form, Header, HTTPException, Request, UploadF
 from fastapi.responses import FileResponse, JSONResponse
 
 import engine
-from extract import GEMINI_KEY, GEMINI_MODEL
+from extract import GEMINI_KEY, GEMINI_MODEL, GROQ_KEY, GROQ_MODEL
 from policy import ACTIONS
 from store import Store
 
@@ -59,7 +59,8 @@ def _limit(req: Request):
 def _view(st: dict) -> dict:
     return {
         "today": engine.today().isoformat(),
-        "ai": {"enabled": bool(GEMINI_KEY), "model": GEMINI_MODEL if GEMINI_KEY else None},
+        "ai": {"enabled": bool(GROQ_KEY or GEMINI_KEY),
+               "model": f"{GROQ_MODEL} on Groq" if GROQ_KEY else (GEMINI_MODEL if GEMINI_KEY else None)},
         "storage": store.kind,
         "restaurants": engine.listing_view(st),
         "messages": st["messages"][:60],
