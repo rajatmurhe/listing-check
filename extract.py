@@ -60,6 +60,9 @@ Rules:
 - Use reopening_or_cancellation when the notice cancels a closure or says it is open as usual.
 - Resolve a written day and month to the nearest matching date to the posted date. Use date_certainty relative for words like 'tomorrow' or 'this Saturday'.
 - quote must be copied word for word from the transcript.
+- Reply with JSON only, using these keys: transcript, is_about_this_restaurant, branch_mentioned, change_type
+  (one of {', '.join(CHANGE_TYPES)}), start_date, end_date, date_certainty (explicit, relative or missing),
+  new_open, new_close, applies_to_days, quote, summary.
 
 Notice:
 {source.get('text') or '(see the attached photo)'}"""
@@ -73,6 +76,8 @@ async def extract(restaurant: dict, source: dict, today: date, image: tuple[byte
             out["engine"] = "ai"
             out["engine_note"] = f"Read by {GEMINI_MODEL}"
             return _check_quote(out)
+        except GeminiError as e:
+            note = f"The AI could not read this ({e}), so the basic parser was used."
         except Exception as e:  # noqa: BLE001
             note = f"The AI could not read this ({type(e).__name__}), so the basic parser was used."
     else:
@@ -88,6 +93,10 @@ async def extract(restaurant: dict, source: dict, today: date, image: tuple[byte
     return _check_quote(out)
 
 
+class GeminiError(Exception):
+    pass
+
+
 async def _gemini(restaurant, source, today, image):
     parts = [{"text": _prompt(restaurant, source, today)}]
     if image:
@@ -100,8 +109,14 @@ async def _gemini(restaurant, source, today, image):
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent"
     async with httpx.AsyncClient(timeout=45) as client:
         r = await client.post(url, params={"key": GEMINI_KEY}, json=body)
-        r.raise_for_status()
+        if r.status_code == 400:
+            # some model versions reject parts of the schema, so fall back to plain JSON mode
+            body["generationConfig"].pop("responseSchema", None)
+            r = await client.post(url, params={"key": GEMINI_KEY}, json=body)
+        if r.status_code >= 400:
+            raise GeminiError(f"HTTP {r.status_code}: {r.text[:160]}")
         txt = r.json()["candidates"][0]["content"]["parts"][0]["text"]
+    txt = txt.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
     out = json.loads(txt)
     return _normalise(out)
 
