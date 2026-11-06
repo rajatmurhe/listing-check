@@ -126,7 +126,10 @@ async def _candidates(client) -> list[str]:
 
 async def _post(client, model, body):
     url = f"{API}/{model}:generateContent"
-    r = await client.post(url, params={"key": GEMINI_KEY}, json=body)
+    try:
+        r = await client.post(url, params={"key": GEMINI_KEY}, json=body)
+    except httpx.TimeoutException:
+        return None
     if r.status_code == 429:
         m = re.search(r'"retryDelay":\s*"(\d+)', r.text)
         await asyncio.sleep(min(int(m.group(1)) if m else 3, 5))
@@ -147,16 +150,19 @@ async def _gemini(restaurant, source, today, image):
         "contents": [{"role": "user", "parts": parts}],
         "generationConfig": {"temperature": 0, "responseMimeType": "application/json", "responseSchema": SCHEMA},
     }
-    async with httpx.AsyncClient(timeout=45) as client:
+    async with httpx.AsyncClient(timeout=20) as client:
         r = await _post(client, _model["name"], body)
-        if r.status_code in (404, 429):
-            for name in (await _candidates(client))[:3]:
+        if r is None or r.status_code in (404, 429, 500, 503):
+            # gone, out of quota, overloaded or too slow: try the other Flash models
+            for name in (await _candidates(client))[:5]:
                 if name == _model["name"]:
                     continue
                 r = await _post(client, name, body)
-                if r.status_code < 400:
+                if r is not None and r.status_code < 400:
                     _model["name"] = name
                     break
+        if r is None:
+            raise GeminiError("the model took too long to answer")
         if r.status_code >= 400:
             raise GeminiError(f"HTTP {r.status_code}: {r.text[:160]}")
         txt = r.json()["candidates"][0]["content"]["parts"][0]["text"]
