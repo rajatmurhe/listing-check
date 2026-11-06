@@ -17,6 +17,9 @@ import httpx
 
 GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
 GEMINI_KEY = os.environ.get("GEMINI_API_KEY", "")
+GROQ_KEY = os.environ.get("GROQ_API_KEY", "")
+GROQ_MODEL = os.environ.get("GROQ_MODEL", "llama-3.3-70b-versatile")
+GROQ_VISION_MODEL = os.environ.get("GROQ_VISION_MODEL", "meta-llama/llama-4-scout-17b-16e-instruct")
 
 CHANGE_TYPES = [
     "temporary_closure", "hours_change", "reopening_or_cancellation",
@@ -71,9 +74,18 @@ Notice:
 
 
 async def extract(restaurant: dict, source: dict, today: date, image: tuple[bytes, str] | None = None) -> dict:
-    """Return the extraction plus which engine produced it."""
+    """Return the extraction plus which engine produced it. Groq first, Gemini as backup."""
+    problems = []
+    if GROQ_KEY:
+        try:
+            out, model = await _groq(restaurant, source, today, image)
+            out["engine"] = "ai"
+            out["engine_note"] = f"Read by {model} on Groq"
+            return _check_quote(out)
+        except Exception as e:  # noqa: BLE001
+            problems.append(f"Groq: {str(e)[:120] or type(e).__name__}")
     if GEMINI_KEY and time.time() < _cooldown["until"]:
-        note = "The AI is out of quota right now, so the basic parser was used."
+        problems.append("Gemini: out of quota right now")
     elif GEMINI_KEY:
         try:
             out = await _gemini(restaurant, source, today, image)
@@ -83,9 +95,11 @@ async def extract(restaurant: dict, source: dict, today: date, image: tuple[byte
         except GeminiError as e:
             if "429" in str(e):
                 _cooldown["until"] = time.time() + 600  # stop hammering a key that is out of quota
-            note = f"The AI could not read this ({e}), so the basic parser was used."
+            problems.append(f"Gemini: {str(e)[:120]}")
         except Exception as e:  # noqa: BLE001
-            note = f"The AI could not read this ({type(e).__name__}), so the basic parser was used."
+            problems.append(f"Gemini: {type(e).__name__}")
+    if problems:
+        note = "The AI could not read this (" + "; ".join(problems) + "), so the basic parser was used."
     else:
         note = "No AI key is set on this server, so the basic parser was used."
     if image and not source.get("text"):
@@ -97,6 +111,55 @@ async def extract(restaurant: dict, source: dict, today: date, image: tuple[byte
     out["engine"] = "basic"
     out["engine_note"] = note
     return _check_quote(out)
+
+
+# ---------------------------------------------------------------- Groq (OpenAI compatible)
+GROQ_API = "https://api.groq.com/openai/v1"
+_groq_model = {"text": GROQ_MODEL, "vision": GROQ_VISION_MODEL}
+
+
+async def _groq_pick(client, vision: bool) -> str | None:
+    """If a model was retired, pick another one this key can use."""
+    r = await client.get(f"{GROQ_API}/models", headers={"Authorization": f"Bearer {GROQ_KEY}"})
+    if r.status_code >= 400:
+        return None
+    ids = [m["id"] for m in r.json().get("data", []) if m.get("active", True)]
+    prefs = ("scout", "maverick", "vision") if vision else ("gpt-oss-120b", "llama-3.3-70b", "llama-4-maverick", "gpt-oss-20b", "llama")
+    for p in prefs:
+        for i in ids:
+            if p in i and "guard" not in i and "whisper" not in i and "tts" not in i:
+                return i
+    return None
+
+
+async def _groq(restaurant, source, today, image):
+    kind = "vision" if image else "text"
+    content = _prompt(restaurant, source, today)
+    if image:
+        data, mime = image
+        content = [{"type": "text", "text": content},
+                   {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{base64.b64encode(data).decode()}"}}]
+    headers = {"Authorization": f"Bearer {GROQ_KEY}"}
+    async with httpx.AsyncClient(timeout=25) as client:
+        for attempt in range(3):
+            body = {"model": _groq_model[kind], "temperature": 0,
+                    "response_format": {"type": "json_object"},
+                    "messages": [{"role": "user", "content": content}]}
+            r = await client.post(f"{GROQ_API}/chat/completions", headers=headers, json=body)
+            if r.status_code == 429 and attempt < 2:
+                await asyncio.sleep(2)
+                continue
+            if r.status_code in (400, 404) and "model" in r.text.lower() and attempt < 2:
+                picked = await _groq_pick(client, bool(image))
+                if picked and picked != _groq_model[kind]:
+                    _groq_model[kind] = picked
+                    continue
+            break
+        if r.status_code >= 400:
+            raise RuntimeError(f"HTTP {r.status_code}: {r.text[:120]}")
+        txt = r.json()["choices"][0]["message"]["content"]
+    txt = txt.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
+    return _normalise(json.loads(txt)), _groq_model[kind]
 
 
 class GeminiError(Exception):
